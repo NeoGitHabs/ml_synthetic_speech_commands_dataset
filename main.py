@@ -55,14 +55,16 @@ model.to(device)
 model.eval()
 
 st.title('Speech Commands Classifier')
-st.text('Загрузите аудио команду, и модель попробует её распознать.')
+st.text('Загрузите аудио команду или голосовую команду, и модель попробует её распознать.')
 
 audio_file = st.file_uploader('Выберите аудио', type=['wav', 'mp3', 'flac', 'ogg'])
 
+speech_file = st.audio_input('Говорить команду: ')
+
 if not audio_file:
-    st.info('Загрузите аудио')
+    st.info('Загрузите аудио или говорите команду')
 else:
-    st.audio(audio_file)
+    st.audio(audio_file) or st.audio(speech_file)
 
     if st.button('Распознать'):
         try:
