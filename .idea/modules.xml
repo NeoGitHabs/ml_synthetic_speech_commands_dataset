@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/audio_speechcommands.iml" filepath="$PROJECT_DIR$/.idea/audio_speechcommands.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/ml_synthetic_speech_commands_dataset.iml" filepath="$PROJECT_DIR$/.idea/ml_synthetic_speech_commands_dataset.iml" />
     </modules>
   </component>
 </project>
