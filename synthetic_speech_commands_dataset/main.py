@@ -1,15 +1,14 @@
-import streamlit as st
-import torch.nn as nn
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from torchaudio import transforms
 import torch.nn.functional as F
-import torch
-import tempfile
 import soundfile as sf
+import streamlit as st
+import torch.nn as nn
+import tempfile
+import uvicorn
+import torch
 import os
 import io
-
-from fastapi import FastAPI, UploadFile, File, HTTPException
-import uvicorn
 
 
 
@@ -156,4 +155,3 @@ else:
 
         except Exception as e:
             st.error(f'Ошибка: {str(e)}')
-
