@@ -119,7 +119,6 @@ else:
                 tmp_file.write(audio_file.read())
                 tmp_path = tmp_file.name
 
-            # Загрузка через soundfile
             waveform, sr = sf.read(tmp_path)
             waveform = torch.from_numpy(waveform).float()
 
@@ -131,12 +130,10 @@ else:
 
             os.unlink(tmp_path)
 
-            # Ресемплинг если нужно
             if sr != 16000:
                 resampler = transforms.Resample(orig_freq=sr, new_freq=16000)
                 waveform = resampler(waveform)
 
-            # Спектрограмма + паддинг
             spec = transform(waveform).squeeze(0)
 
             if spec.shape[1] > max_len:
