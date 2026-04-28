@@ -1,24 +1,22 @@
 import streamlit as st
 import torch.nn as nn
-import torchaudio.transforms as T
+from torchaudio import transforms
 import torch.nn.functional as F
 import torch
 import tempfile
 import soundfile as sf
 import os
+import io
 
-# Классы Speech Commands (35 команд)
+from fastapi import FastAPI, UploadFile, File, HTTPException
+import uvicorn
+
+
+
 classes = ['bed', 'four', 'happy', 'nine', 'zero', 'go', 'eight', 'down', 'house', 'bird',
            'off', 'marvin', 'on', 'up', 'sheila', 'visual', 'follow', 'cat', 'yes', 'tree',
            'learn', 'six', 'no', 'left', 'one', 'two', 'stop', 'seven', 'backward', 'three',
            'dog', 'wow', 'five', 'forward', 'right']
-
-# Параметры из notebook
-SAMPLE_RATE = 16000
-N_MELS = 64
-MAX_LEN = 100
-
-transform = T.MelSpectrogram(sample_rate=SAMPLE_RATE, n_mels=N_MELS)
 
 
 class CheckAudio(nn.Module):
@@ -47,12 +45,62 @@ class CheckAudio(nn.Module):
         return audio
 
 
-# Загрузка модели
+index_to_label = {ind:lab for ind, lab in enumerate(classes)}
+
+transform = transforms.MelSpectrogram(sample_rate=16000, n_mels=64)
+max_len = 100
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 model = CheckAudio()
 model.load_state_dict(torch.load('audioCpeechCommands_model.pth', map_location=device))
 model.to(device)
 model.eval()
+
+# app = FastAPI()
+#
+# def change_audio(waveform, sample_rate):
+#     if sample_rate != 16000:
+#         new_sr = transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+#         waveform = new_sr(torch.tensor(waveform))
+#
+#     spec = transform(waveform).squeeze(0)
+#
+#     if spec.shape[1] > max_len:
+#         spec = spec[:, :max_len]
+#
+#     if spec.shape[1] < max_len:
+#         count_len = max_len - spec.shape[1]
+#         spec = F.pad(spec, (0, count_len))
+#
+#     return spec
+#
+#
+# @app.post('/predict')
+# async def predict_audio(file: UploadFile = File(...)):
+#     try:
+#         data = await file.read()
+#         if not data:
+#             raise HTTPException(status_code=400, detail='Файл пустой')
+#
+#         wf, sr = sf.read(io.BytesIO(data), dtype='float32')
+#         wf = torch.tensor(wf).T
+#
+#         spec = change_audio(wf, sr).unsqueeze(0).to(device)
+#
+#         with torch.no_grad():
+#             y_pred = model(spec)
+#             pred_ind = torch.argmax(y_pred, dim=1).item()
+#             pred_class = index_to_label[pred_ind]
+#             return {'Индекс': pred_ind, 'Класс': pred_class}
+#
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+#
+# if __name__ == '__main__':
+#     uvicorn.run(app, host='127.0.0.1', port=8000)
+
 
 st.title('Speech Commands Classifier')
 st.text('Загрузите аудио команду или голосовую команду, и модель попробует её распознать.')
@@ -85,17 +133,17 @@ else:
             os.unlink(tmp_path)
 
             # Ресемплинг если нужно
-            if sr != SAMPLE_RATE:
-                resampler = T.Resample(orig_freq=sr, new_freq=SAMPLE_RATE)
+            if sr != 16000:
+                resampler = transforms.Resample(orig_freq=sr, new_freq=16000)
                 waveform = resampler(waveform)
 
             # Спектрограмма + паддинг
             spec = transform(waveform).squeeze(0)
 
-            if spec.shape[1] > MAX_LEN:
-                spec = spec[:, :MAX_LEN]
-            elif spec.shape[1] < MAX_LEN:
-                count_len = MAX_LEN - spec.shape[1]
+            if spec.shape[1] > max_len:
+                spec = spec[:, :max_len]
+            elif spec.shape[1] < max_len:
+                count_len = max_len - spec.shape[1]
                 spec = F.pad(spec, (0, count_len))
 
             spec = spec.unsqueeze(0).to(device)
@@ -109,28 +157,3 @@ else:
         except Exception as e:
             st.error(f'Ошибка: {str(e)}')
 
-
-
-
-# app = FastAPI()
-#
-# @app.post('/predict')
-# async def check_image(file:UploadFile = File(...)):
-#     try:
-#         data = await file.read()
-#         if not data:
-#             raise HTTPException(status_code=400, detail='File not Found')
-#
-#         img = Image.open(io.BytesIO(data))
-#         img_tensor = transform(img).unsqueeze(0).to(device)
-#
-#         with torch.no_grad():
-#             prediction = model(img_tensor)
-#             result = prediction.argmax(dim=1).item()
-#             return {f'class': classes[result]}
-#
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f'{e}')
-#
-# if __name__ == '__main__':
-#     uvicorn.run(app, host='127.0.0.1', port=8000)
