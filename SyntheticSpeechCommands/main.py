@@ -1,59 +1,42 @@
+# SyntheticSpeechCommands/main.py
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from torchaudio import transforms
 import torch.nn.functional as F
-import soundfile as sf
+from torchvision.models import resnet18
+from pathlib import Path
 import streamlit as st
+import soundfile as sf
 import torch.nn as nn
-import tempfile
 import uvicorn
 import torch
-import os
 import io
 
 
-classes = ['bed', 'four', 'happy', 'nine', 'zero', 'go', 'eight', 'down', 'house', 'bird',
-           'off', 'marvin', 'on', 'up', 'sheila', 'visual', 'follow', 'cat', 'yes', 'tree',
-           'learn', 'six', 'no', 'left', 'one', 'two', 'stop', 'seven', 'backward', 'three',
-           'dog', 'wow', 'five', 'forward', 'right']
+BASE_DIR = Path(__file__).parent
 
 
+# ── Model ──────────────────────────────────────────────────────────────────────
 class CheckAudio(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
-        self.first = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.AdaptiveAvgPool2d((8, 8))
-        )
-        self.second = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(32 * 8 * 8, 128),
-            nn.ReLU(),
-            nn.Linear(128, 35)  # 35 классов
-        )
+        self.model = resnet18(weights=None)
+        self.model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
-    def forward(self, audio):
-        audio = audio.unsqueeze(1)
-        audio = self.first(audio)
-        audio = self.second(audio)
-        return audio
+    def forward(self, x):
+        return self.model(x)
 
 
-index_to_label = {ind: lab for ind, lab in enumerate(classes)}
-
-transform = transforms.MelSpectrogram(sample_rate=16000, n_mels=64)
-max_len = 100
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-model = CheckAudio()
-model.load_state_dict(torch.load('model_SyntheticSpeechCommands.pth', map_location=device))
-model.to(device)
-model.eval()
+# ── Transform ──────────────────────────────────────────────────────────────────
+mel_transform = transforms.MelSpectrogram(
+    sample_rate=16000,
+    n_fft=1024,
+    hop_length=160,
+    n_mels=80
+)
+amp_to_db = transforms.AmplitudeToDB()
+TARGET_TIME_FRAMES = 101
 
 
 def change_audio(waveform, sample_rate):
@@ -70,15 +53,31 @@ def change_audio(waveform, sample_rate):
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)  # (1, T)
 
-    spec = transform(waveform).squeeze(0)
+    spec = amp_to_db(mel_transform(waveform)).squeeze(0)
 
-    if spec.shape[1] > max_len:
-        spec = spec[:, :max_len]
-    if spec.shape[1] < max_len:
-        count_len = max_len - spec.shape[1]
-        spec = F.pad(spec, (0, count_len))
+    if spec.shape[1] > TARGET_TIME_FRAMES:
+        spec = spec[:, :TARGET_TIME_FRAMES]
+    elif spec.shape[1] < TARGET_TIME_FRAMES:
+        pad_amount = TARGET_TIME_FRAMES - spec.shape[1]
+        spec = F.pad(spec, (0, pad_amount))
 
     return spec
+
+
+# ── Load model ─────────────────────────────────────────────────────────────────
+@st.cache_resource
+def load_model():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    classes = torch.load(BASE_DIR / 'label_SyntheticSpeechCommands.pth', weights_only=False)
+    model = CheckAudio(num_classes=len(classes))
+    model.load_state_dict(torch.load(BASE_DIR / 'model_CheckAudio_SyntheticSpeechCommands.pth', map_location=device))
+    model.to(device)
+    model.eval()
+    return model, device, classes
+
+
+model, device, classes = load_model()
+index_to_label = {ind: lab for ind, lab in enumerate(classes)}
 
 
 app = FastAPI()
@@ -110,38 +109,29 @@ if __name__ == '__main__':
     uvicorn.run(app, host='127.0.0.1', port=8000)
 
 
-# st.title('Speech Commands Classifier')
-# st.text('Загрузите аудио команду или голосовую команду, и модель попробует её распознать.')
+# ── Streamlit ──────────────────────────────────────────────────────────────────
+# st.title('Synthetic Speech Commands Model')
+# st.text('Загрузите аудиофайл с командой, и модель попробует её распознать.')
 #
-# audio_file = st.file_uploader('Выберите аудио', type=['wav', 'mp3', 'flac', 'ogg'])
-# speech_file = st.audio_input('Говорить команду: ')
+# uploaded_file = st.file_uploader('Выберите аудиофайл', type=['wav', 'flac', 'ogg'])
 #
-# if audio_file is None and speech_file is None:
-#     st.info('Загрузите аудио или говорите команду')
+# if not uploaded_file:
+#     st.info('Загрузите аудиофайл')
 # else:
-#     if audio_file:
-#         st.audio(audio_file)
-#     if speech_file:
-#         st.audio(speech_file)
+#     st.audio(uploaded_file)
 #
-#     if st.button('Распознать'):
+#     if st.button('Распознать команду'):
 #         try:
-#             file_to_process = audio_file if audio_file is not None else speech_file
+#             wf, sr = sf.read(io.BytesIO(uploaded_file.read()), dtype='float32')
+#             wf = torch.tensor(wf).T if wf.ndim == 2 else torch.tensor(wf)  # (C, T) или (T,)
 #
-#             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-#                 tmp_file.write(file_to_process.read())
-#                 tmp_path = tmp_file.name
-#
-#             waveform, sr = sf.read(tmp_path)
-#             os.unlink(tmp_path)
-#
-#             spec = change_audio(waveform, sr).unsqueeze(0).to(device)
+#             spec = change_audio(wf, sr).unsqueeze(0).to(device)
 #
 #             with torch.no_grad():
-#                 y_prediction = model(spec)
-#                 prediction = y_prediction.argmax(dim=1).item()
+#                 y_pred = model(spec)
+#                 prediction = y_pred.argmax(dim=1).item()
 #
-#             st.success(f'Модель думает, что это команда: {classes[prediction]}')
+#             st.success(f'Модель думает, что это команда: {index_to_label[prediction]}')
 #
 #         except Exception as e:
 #             st.error(f'Ошибка: {str(e)}')
