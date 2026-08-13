@@ -1,13 +1,15 @@
 # Voice Command Recognition System
 
-> CNN классифицирует 35 голосовых команд за < 30 мс полностью на устройстве —
-> без cloud API, без сетевой задержки, без передачи аудио на сторонние серверы.
+> ResNet18 (адаптированный под аудио) классифицирует 35 голосовых команд
+> полностью на устройстве — без cloud API, без сетевой задержки,
+> без передачи аудио на сторонние серверы.
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue)]()
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-orange)]()
 [![torchaudio](https://img.shields.io/badge/torchaudio-2.x-purple)]()
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.1x-teal)]()
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.x-red)]()
-[![Accuracy](https://img.shields.io/badge/Accuracy-87%25-brightgreen)]()
+[![Accuracy](https://img.shields.io/badge/Accuracy-97%25-brightgreen)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)]()
 
 ---
@@ -17,7 +19,7 @@
 Cloud speech API (Google, AWS) стоят $0.004–$0.006 за запрос.
 При 1 млн команд/день — это $4 000–$6 000 в месяц плюс 200–800 мс сетевой задержки.
 В healthcare, industrial IoT и embedded-устройствах аудио вообще нельзя отправлять наружу.
-Этот классификатор работает полностью локально: $0 API-затрат, < 30 мс инференс,
+Этот классификатор работает полностью локально: $0 API-затрат, инференс на CPU,
 аудио не покидает устройство.
 
 ---
@@ -26,23 +28,37 @@ Cloud speech API (Google, AWS) стоят $0.004–$0.006 за запрос.
 
 ```bash
 git clone https://github.com/your-username/voice-command-recognition
-cd voice-command-recognition
-pip install torch torchaudio streamlit soundfile
+cd SyntheticSpeechCommands
+pip install -r requirements.txt
 
-python train.py          # → audioSpeechCommands_model.pth + label.pth
-streamlit run main.py    # → http://localhost:8501
+# Обучение (Google Colab, см. SyntheticSpeechCommands.ipynb)
+# → model_CheckAudio_SyntheticSpeechCommands.pth + label_SyntheticSpeechCommands.pth
+
+# Вариант 1 — REST API
+python main.py
+# → POST http://127.0.0.1:8000/predict  (multipart/form-data, поле file)
+
+# Вариант 2 — веб-интерфейс с загрузкой файла
+streamlit run main.py
 ```
+
+> В `main.py` оба интерфейса лежат рядом: FastAPI-эндпоинт активен по умолчанию,
+> Streamlit-блок закомментирован внизу файла — раскомментируйте его вместо
+> `if __name__ == '__main__':`, чтобы поднять веб-демо.
 
 ---
 
 ## Demo
 
-Streamlit UI — два режима ввода:
+**FastAPI:**
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -F "file=@test audio/five.wav"
+# → {"Индекс": 7, "Класс": "five"}
+```
 
-Загрузить файл  (WAV / MP3 / FLAC / OGG)
-Нажать кнопку микрофона → говорить → нажать "Распознать"
-
-Вывод: "Модель думает, что это команда: stop"
+**Streamlit:** загрузка WAV/FLAC/OGG → кнопка "Распознать команду" →
+"Модель думает, что это команда: five"
 
 **35 поддерживаемых команд:**
 
@@ -52,160 +68,124 @@ on · off · follow · learn · visual · zero–nine (0–9) · happy · wow
 
 bird · cat · dog · bed · house · tree · marvin · sheila
 
-
 ---
 
 ## Результаты
 
-| Модель                                  | Accuracy | Параметры | Размер  | Инференс CPU |
-|-----------------------------------------|----------|-----------|---------|--------------|
-| Random classifier (35 классов)          | 2.9%     | —         | —       | —            |
-| MLP на Mel-фичах                        | 71%      | 2.1M      | 8 МБ   | ~15 мс       |
-| **CNN 3-block (этот проект)**           | **87%**  | **3.4M**  | **13 МБ** | **< 30 мс** |
-| Wav2Vec 2.0 (pretrained, референс)      | ~97%     | 95M       | 360 МБ | ~400 мс CPU  |
+| Модель                                  | Accuracy | Параметры | Размер   |
+|------------------------------------------|----------|-----------|----------|
+| Random classifier (35 классов)            | 2.9%     | —         | —        |
+| **ResNet18 adapted (этот проект)**        | **97.15%** (val) | **~11.2M** | **~44.8 МБ** |
+| Wav2Vec 2.0 (pretrained, референс)        | ~97%     | 95M       | 360 МБ   |
 
-**Почему CNN, а не Wav2Vec 2.0:**
-Wav2Vec 2.0 даёт 97% — но требует 360 МБ и ~400 мс на CPU.
-На Raspberry Pi 4 это 1–2 сек задержки, неприемлемо для real-time управления.
-CNN весит 13 МБ, работает за < 30 мс на CPU, деплоится на любом edge-устройстве.
-Разница в 10% accuracy не стоит 28× увеличения размера модели для keyword spotting задачи.
+train: 95.54% · test: 97.03% · val: 97.15% (после 20 эпох, AdamW + CosineAnnealingLR)
 
-**Честная строчка:** 87% — это обученная с нуля за 15 эпох модель без pretrained весов.
-Для production в шумной среде → fine-tuning на domain-specific данных подтянет до 92–94%.
+**Почему адаптированный ResNet18, а не Wav2Vec 2.0:**
+Wav2Vec 2.0 даёт сопоставимую точность, но весит 360 МБ — почти в 8 раз больше.
+ResNet18 с 1-канальным первым слоем под Mel-спектрограмму даёт тот же уровень
+точности при значительно меньшем футпринте, что критично для CPU-инференса
+и edge-деплоя.
 
 ---
 
 ## Датасет
 
 - **Источник:** Google Speech Commands v2 — `torchaudio.datasets.SPEECHCOMMANDS`
-- **Объём:** ~105 000 односекундных WAV-клипов, 16 кГц, моно
-- **Feature extraction:** raw waveform → `MelSpectrogram(sample_rate=16000, n_mels=64)`
-  → тензор `[1, 64, 81]` → обрабатывается как 2D-изображение для CNN
-- **Баланс:** ~3 000 клипов на класс, почти сбалансировано
+- **Объём:** ~105 000 односекундных WAV-клипов, 16 кГц, 35 классов
+- **Feature extraction:** raw waveform → `MelSpectrogram(sample_rate=16000, n_fft=1024, hop_length=160, n_mels=80)` → `AmplitudeToDB` → тензор `[1, 80, 101]`, обрабатывается как 2D-изображение
 
-| Проблема данных                              | Решение                                        | Эффект                    |
-|----------------------------------------------|------------------------------------------------|---------------------------|
-| Клипы разной длины (0.5–1.0 сек)            | `collate_fn` фильтрует до ровно 16 000 сэмплов | Нет ошибок размерности    |
-| Пользовательский аудио: 8/22/44/48 кГц      | `Resample(orig_freq=sr, new_freq=16000)`       | Любой формат без ошибок   |
-| Спектрограммы переменной длины при инференсе | Truncation + `F.pad` до `max_len=100` фреймов  | Консистентный CNN input   |
+| Проблема данных                              | Решение                                                  | Эффект                    |
+|------------------------------------------------|-----------------------------------------------------------|----------------------------|
+| Клипы переменной длины по времени               | Truncation / `F.pad` до `TARGET_TIME_FRAMES=101`          | Консистентный CNN input   |
+| Аугментация на train (SpecAugment)              | `FrequencyMasking(15)` + `TimeMasking(35)`                 | Устойчивость к шуму        |
+| Пользовательский аудио произвольной sample rate | `Resample(orig_freq=sr, new_freq=16000)` при инференсе     | Любой формат без ошибок    |
+| Стерео на входе                                 | `waveform.mean(dim=0, keepdim=True)` → моно                | Единый формат для модели   |
 
 ---
 
 ## Архитектура
-
-    Аудио (WAV/MP3/FLAC/OGG / микрофон)
-
+```
+Аудио (WAV/MP3/FLAC/OGG / микрофон)
 │
-
 ▼
-
-    Resample → 16 кГц (если нужно)
-
+Resample → 16 кГц (если нужно) + приведение к моно
 │
-
 ▼
-
-    MelSpectrogram(n_mels=64)   →  [1, 64, 81]
-    
-    truncate / F.pad до max_len=100
-
+MelSpectrogram(n_fft=1024, hop=160, n_mels=80) → AmplitudeToDB
 │
-
 ▼
-
-    Conv2d(1→32) + BatchNorm2d + ReLU + MaxPool2d(2)
-
+truncate / F.pad до TARGET_TIME_FRAMES=101 → [1, 80, 101]
 │
-
 ▼
-    
-    Conv2d(32→64) + BatchNorm2d + ReLU + MaxPool2d(2)
-
+ResNet18 (веса не предобучены)
+conv1: Conv2d(1→64, kernel=7, stride=2, padding=3) ← адаптирован под 1-канальный вход
+... стандартные residual-блоки ResNet18 ...
+fc: Linear(512 → 35)
 │
-
 ▼
+argmax → predicted command label
+```
 
-    Conv2d(64→128) + BatchNorm2d + ReLU + MaxPool2d(2)
-
-│
-
-▼
-
-    AdaptiveAvgPool2d((8,8))    ← устойчивость к переменной длине
-
-│
-
-▼
-    
-    Linear(2048→128) + ReLU + Linear(128→35)
-
-│
-
-▼
-
-    argmax → predicted command label
-
-
-**`AdaptiveAvgPool2d((8,8))`** — вместо фиксированного `MaxPool2d` перед FC.
-Позволяет CNN принимать спектрограммы разной длины без ошибок размерности.
-Критично для production: реальные аудио-файлы не ровно 1 секунда.
-
----
-
-## Edge deployment
-
-Модель протестирована на CPU-only окружениях:
-
-| Устройство         | Инференс | RAM     | Подходит |
-|--------------------|----------|---------|----------|
-| MacBook CPU        | ~12 мс   | —       | Да       |
-| Raspberry Pi 4     | ~28 мс   | ~50 МБ  | Да       |
-| Jetson Nano        | ~8 мс    | ~50 МБ  | Да       |
-| Google Cloud API   | ~250 мс  | N/A     | Нет (latency) |
-
-Для деплоя на edge: `torch.save` → `torch.load(map_location='cpu')` без изменений.
-Нет зависимости от CUDA-драйверов.
+**Почему адаптация `conv1`, а не 3-канальное дублирование спектрограммы:**
+Вместо копирования Mel-спектрограммы в 3 канала под RGB-вход ResNet,
+первый свёрточный слой пересоздан под 1 канал напрямую. Это убирает
+избыточные вычисления и держит модель компактной без потери точности.
 
 ---
 
 ## Стек
 
-| Слой          | Технологии                                     |
-|---------------|------------------------------------------------|
-| ML            | PyTorch, torchaudio                            |
-| Audio         | soundfile, `torchaudio.transforms`             |
-| UI / Demo     | Streamlit (`st.audio_input` для микрофона)     |
-| Regularization| BatchNorm2d, AdamW, weight_decay=1e-4          |
-| Deploy        | Local CPU / Streamlit Cloud / Raspberry Pi     |
+| Слой           | Технологии                                       |
+|----------------|---------------------------------------------------|
+| ML             | PyTorch, torchvision (ResNet18), torchaudio       |
+| Audio          | soundfile, `torchaudio.transforms`                |
+| API            | FastAPI, uvicorn                                  |
+| UI / Demo      | Streamlit                                         |
+| Regularization | AdamW, CosineAnnealingLR, SpecAugment             |
+| Deploy         | Local CPU / Streamlit Cloud                       |
 
 ---
 
 ## Что дальше (Roadmap)
 
-- [ ] Fine-tuning на шумных данных (ESC-50 noise augmentation) → целевые 92%+
-- [ ] `torch.jit.script` экспорт → деплой без Python runtime на embedded
-- [ ] ONNX экспорт → инференс на iOS / Android через CoreML / TFLite
-- [ ] Wake-word режим: непрерывный стриминг с детекцией hotword без кнопки
+- [ ] Разделить FastAPI и Streamlit на отдельные entry-point'ы вместо одного `main.py`
+- [ ] `torch.jit.script` / ONNX экспорт → деплой без Python runtime на embedded
+- [ ] Fine-tuning на шумных данных → устойчивость в production-среде
+- [ ] Wake-word режим: непрерывный стриминг с детекцией hotword
 - [ ] MLflow: трекинг экспериментов по аугментациям и архитектурам
-- [ ] Батч-API `POST /predict/batch` для оффлайн-обработки аудио-очередей
+- [ ] Docker-образ с обоими интерфейсами
 
 ---
 
 ## Business Impact
 
-| Сценарий                               | Cloud API                   | Этот проект              |
-|----------------------------------------|-----------------------------|--------------------------|
-| Стоимость при 1M команд/день           | $4 000–$6 000/мес           | $0                       |
-| Латентность                            | 200–800 мс (сеть)           | < 30 мс (локально)       |
-| Приватность аудио                      | Передаётся на серверы       | Не покидает устройство   |
-| Работа офлайн                          | Нет                         | Да                       |
-| Деплой на edge (Raspberry Pi)          | Нет                         | Да, 13 МБ модель         |
+| Сценарий                      | Cloud API             | Этот проект           |
+|--------------------------------|------------------------|-------------------------|
+| Стоимость при 1M команд/день  | $4 000–$6 000/мес      | $0                       |
+| Латентность                    | 200–800 мс (сеть)      | Локальный CPU-инференс  |
+| Приватность аудио              | Передаётся на серверы  | Не покидает устройство  |
+| Работа офлайн                  | Нет                    | Да                       |
 
+
+## Структура репозитория
+```
+ml_SyntheticSpeechCommands/
+├── .gitignore
+├── readme.md
+├── requirements.txt
+└── SyntheticSpeechCommands/
+    ├── SyntheticSpeechCommands.ipynb
+    ├── labels.py
+    ├── main.py                                    # FastAPI + Streamlit (закомментирован)
+    ├── label_SyntheticSpeechCommands.pth
+    ├── model_CheckAudio_SyntheticSpeechCommands.pth
+    ├── api/
+    │   └── __init__.py
+    ├── db/
+    │   └── __init__.py
+    └── test audio/
+        ├── dog.wav
+        ├── five.wav
+        └── two.wav
+```
 ---
-
-[//]: # (## Автор)
-[//]: # (**[Имя]** — [LinkedIn]&#40;https://linkedin.com/in/you&#41; | [GitHub]&#40;https://github.com/you&#41;)
-
-
-![voice_cnn_inference_pipeline.png](../../../Downloads/voice_cnn_inference_pipeline.png)
-
